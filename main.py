@@ -13,6 +13,8 @@ os.environ["OPENAI_API_KEY"] = "API_KEY"
 loader = PyPDFLoader("2004_tecnologia_informacao_pbqp.pdf")
 documents = loader.load()
 
+
+#teste
 # 🔍 Criar embeddings e armazenar vetores
 text_splitter = CharacterTextSplitter(chunk_size=200, chunk_overlap=20)
 texts = text_splitter.split_documents(documents)
