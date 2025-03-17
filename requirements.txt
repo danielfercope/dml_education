@@ -1,7 +1,0 @@
-#comando para instalação de todas as dependências:
-#pip install -r requirements.txt
-
-langchain==0.3.20
-langchain_community==0.3.19
-pydantic==2.10.6
-pydantic_ai==0.0.40
