@@ -15,6 +15,8 @@ st.set_page_config(page_title="Gerador de Questões - Engenharia de Software", p
 st.title("📘 Gerador de Questões sobre Engenharia de Software")
 st.write("Faça upload de um PDF e obtenha questões de múltipla escolha baseadas no conteúdo!")
 
+uploaded_file = st.file_uploader("📂 Faça upload do seu arquivo PDF", type=["pdf"])
+
 if uploaded_file is not None:
     # Salvar temporariamente o arquivo
     file_path = f"temp_{uploaded_file.name}"
