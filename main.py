@@ -5,16 +5,13 @@ from pydantic import BaseModel
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
-# === CONFIGURAÇÃO GOOGLE ===
 SERVICE_ACCOUNT_FILE = ''
 SCOPES = ['https://www.googleapis.com/auth/forms.body']
 
-# === AUTENTICAÇÃO COM GOOGLE ===
 credentials = service_account.Credentials.from_service_account_file(
     SERVICE_ACCOUNT_FILE, scopes=SCOPES)
 service = build('forms', 'v1', credentials=credentials)
 
-# === CONFIGURAÇÃO OPENAI ===
 os.environ["OPENAI_API_KEY"] = ""
 
 class Resposta(BaseModel):
@@ -29,19 +26,15 @@ agente_rag = Agent(
     system_prompt=""
 )
 
-# === ENTRADA DO USUÁRIO ===
 contexto = input("Descreva aqui sobre o que deseja ensinar hoje:\n")
 
-# === GERA AS PERGUNTAS ===
 response = agente_rag.run_sync(
     user_prompt=f"Com base nisso:\n{contexto}\n\nGere 5 perguntas de múltipla escolha. Aumente o nível de dificuldade a cada pergunta."
 )
 
-# Extrai string da resposta
 texto_perguntas = response.data.resposta.strip()
 print("\n📘 Perguntas geradas:\n", texto_perguntas)
 
-# === CRIA FORMULÁRIO GOOGLE ===
 form_metadata = {
     "info": {
         "title": f"Formulário: {contexto}",
@@ -52,7 +45,6 @@ form = service.forms().create(body=form_metadata).execute()
 form_id = form["formId"]
 print("\n✅ Formulário criado:", form["responderUri"])
 
-# === PROCESSA PERGUNTAS ===
 blocos = re.split(r'\n(?=\d+\.\s)', texto_perguntas)
 requests = []
 
