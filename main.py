@@ -1,76 +1,102 @@
 import os
-import streamlit as st
+import re
 from pydantic_ai import Agent
 from pydantic import BaseModel
-from langchain_community.vectorstores import FAISS
-from langchain_community.embeddings import OpenAIEmbeddings
-from langchain_community.document_loaders import PyPDFLoader
-from langchain.text_splitter import CharacterTextSplitter
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
-os.environ["OPENAI_API_KEY"] = "API_KEY"
+# === CONFIGURAÇÃO GOOGLE ===
+SERVICE_ACCOUNT_FILE = ''
+SCOPES = ['https://www.googleapis.com/auth/forms.body']
 
-# Interface do Streamlit
-st.set_page_config(page_title="Gerador de Questões - Engenharia de Software", page_icon="📘", layout="wide")
-st.title("📘 Gerador de Questões sobre Engenharia de Software")
-st.write("Faça upload de um PDF e personalize a geração de questões!")
+# === AUTENTICAÇÃO COM GOOGLE ===
+credentials = service_account.Credentials.from_service_account_file(
+    SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+service = build('forms', 'v1', credentials=credentials)
 
-if uploaded_file is not None:
-    # Salvar temporariamente o arquivo
-    file_path = f"temp_{uploaded_file.name}"
-    with open(file_path, "wb") as f:
-        f.write(uploaded_file.getbuffer())
-    st.success("📄 Arquivo carregado com sucesso!")
+# === CONFIGURAÇÃO OPENAI ===
+os.environ["OPENAI_API_KEY"] = ""
 
-    # Carregar e processar o PDF
-    loader = PyPDFLoader(file_path)
-    documents = loader.load()
-    text_splitter = CharacterTextSplitter(chunk_size=500, chunk_overlap=50)
-    texts = text_splitter.split_documents(documents)
-    vectorstore = FAISS.from_documents(texts, OpenAIEmbeddings())
+class Resposta(BaseModel):
+    resposta: str
 
-    # Personalização pelo professor
-    num_questions = st.slider("🔢 Quantidade de perguntas", min_value=1, max_value=10, value=5)
-    difficulty = st.selectbox("🎯 Nível de dificuldade", ["Fácil", "Médio", "Difícil"], index=1)
+    def __repr__(self):
+        return f"Resposta({self.resposta})"
 
-    if st.button("🚀 Gerar História e Questões"):
-        # Buscar contexto relevante
-        docs_relevantes = vectorstore.similarity_search("", k=5)
-        contexto = "\n".join([doc.page_content for doc in docs_relevantes])
+agente_rag = Agent(
+    model="gpt-4o-mini",
+    result_type=Resposta,
+    system_prompt=""
+)
 
+# === ENTRADA DO USUÁRIO ===
+contexto = input("Descreva aqui sobre o que deseja ensinar hoje:\n")
 
-        # Modelo de resposta
-        class Resposta(BaseModel):
-            historia: str
-            questoes: list
+# === GERA AS PERGUNTAS ===
+response = agente_rag.run_sync(
+    user_prompt=f"Com base nisso:\n{contexto}\n\nGere 5 perguntas de múltipla escolha. Aumente o nível de dificuldade a cada pergunta."
+)
 
+# Extrai string da resposta
+texto_perguntas = response.data.resposta.strip()
+print("\n📘 Perguntas geradas:\n", texto_perguntas)
 
-        # Criar o agente
-        agente_rag = Agent(
-            model="gpt-4o-mini",
-            result_type=Resposta,
-            system_prompt="Você é um agente especializado em engenharia de software que gera histórias e questões baseadas em documentos fornecidos."
-        )
+# === CRIA FORMULÁRIO GOOGLE ===
+form_metadata = {
+    "info": {
+        "title": f"Formulário: {contexto}",
+        "documentTitle": f"Aula - {contexto}"
+    }
+}
+form = service.forms().create(body=form_metadata).execute()
+form_id = form["formId"]
+print("\n✅ Formulário criado:", form["responderUri"])
 
-        # Gerar história e questões
-        response = agente_rag.run_sync(
-            user_prompt=f"Baseando-se no seguinte conteúdo:\n{contexto}\n\nCrie uma história completa que introduza o tema do documento. Depois, gere {num_questions} perguntas de múltipla escolha com nível de dificuldade {difficulty}. Forneça o gabarito para cada questão."
-        )
+# === PROCESSA PERGUNTAS ===
+blocos = re.split(r'\n(?=\d+\.\s)', texto_perguntas)
+requests = []
 
-        # Edição pelo professor
-        historia_editada = st.text_area("📝 História Gerada:", value=response.data.historia, height=200)
-        questoes_formatadas = "\n\n".join(
-            [
-                f"🔹 {q['pergunta']}\n"
-                + "\n".join([f"   - {alt}" for alt in q['opcoes']])
-                + f"\n✅ Resposta correta: {q['gabarito']}"
-                for q in response.data.questoes
-            ]
-        )
+for bloco in blocos:
+    bloco = bloco.strip()
+    if not bloco:
+        continue
 
-        questoes_editadas = st.text_area("📌 Questões Geradas:", value=questoes_formatadas, height=300)
+    linhas = bloco.split("\n")
+    titulo = linhas[0].strip().replace("\n", " ")
 
-        if st.button("✅ Salvar Questões e História"):
-            st.success("História e questões salvas com sucesso!")
+    opcoes = []
+    for linha in linhas[1:]:
+        linha = linha.strip().replace("\n", " ")
+        match = re.match(r"[a-dA-D]\)\s*(.+)", linha)
+        valor = match.group(1).strip() if match else linha.strip()
+        valor = valor.replace("\n", " ")
+        opcoes.append({"value": valor})
 
-    # Excluir o arquivo temporário
-    os.remove(file_path)
+    while len(opcoes) < 4:
+        opcoes.append({"value": "Opção"})
+
+    requests.append({
+        "createItem": {
+            "item": {
+                "title": titulo,
+                "questionItem": {
+                    "question": {
+                        "required": True,
+                        "choiceQuestion": {
+                            "type": "RADIO",
+                            "options": opcoes[:4],
+                            "shuffle": True
+                        }
+                    }
+                }
+            },
+            "location": {
+                "index": 0
+            }
+        }
+    })
+
+# === ENVIA AS QUESTÕES PARA O FORMULÁRIO ===
+service.forms().batchUpdate(formId=form_id, body={"requests": requests}).execute()
+print("\n✅ Perguntas adicionadas com sucesso!")
+print("🔗 Link do formulário:", form["responderUri"])
